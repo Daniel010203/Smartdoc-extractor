@@ -1,0 +1,408 @@
+Perfeito. Vamos avançar seguindo a sequência da engenharia que definimos.
+
+Capítulo 11 — Diagrama Entidade-Relacionamento (DER)
+
+Agora vamos transformar o Modelo Lógico do Banco de Dados em uma representação visual das entidades e dos relacionamentos.
+
+A ideia é não criar o banco ainda. Primeiro validamos o DER; depois partimos para PostgreSQL, SQLAlchemy e migrations.
+
+11.1 Estrutura principal
+
+O relacionamento central do SmartDoc Extractor será:
+
+┌──────────────┐
+                    │   PROFILES   │
+                    └──────┬───────┘
+                           │ 1:N
+                           ▼
+                    ┌──────────────┐
+                    │    USERS     │
+                    └──────┬───────┘
+                           │
+                ┌──────────┼───────────┐
+                │          │           │
+               1:N        1:N         1:N
+                │          │           │
+                ▼          ▼           ▼
+          DOCUMENTS    AUDIT_LOGS   EXPORTS
+              │
+              │ 1:N
+              ▼
+        ┌─────────────┐
+        │ EXTRACTIONS │
+        └──────┬──────┘
+               │ 1:N
+               ▼
+      ┌──────────────────┐
+      │ EXTRACTED_VALUES │
+      └────────┬─────────┘
+               │ 1:N
+               ▼
+        ┌────────────┐
+        │ VALIDATIONS│
+        └────────────┘
+
+A estrutura de configuração documental ficará:
+
+┌───────────────────┐
+│ DOCUMENT_MODELS   │
+└─────────┬─────────┘
+          │ 1:N
+          ▼
+     ┌──────────┐
+     │  FIELDS  │
+     └────┬─────┘
+          │ 1:N
+          ▼
+┌────────────────────┐
+│ EXTRACTION_RULES   │
+└────────────────────┘
+
+E o workflow:
+
+DOCUMENTS
+    │
+    │ 1:N
+    ▼
+WORKFLOW_EVENTS
+
+
+---
+
+11.2 DER completo
+
+Para o GitHub, recomendo utilizarmos Mermaid, porque o GitHub renderiza diagramas Mermaid diretamente em arquivos Markdown.
+
+erDiagram
+
+    PROFILES ||--o{ USERS : possui
+
+    USERS ||--o{ DOCUMENTS : envia
+    USERS ||--o{ WORKFLOW_EVENTS : executa
+    USERS ||--o{ AUDIT_LOGS : realiza
+    USERS ||--o{ EXPORTS : solicita
+
+    DOCUMENT_MODELS ||--o{ DOCUMENTS : classifica
+    DOCUMENT_MODELS ||--o{ FIELDS : possui
+
+    FIELDS ||--o{ EXTRACTION_RULES : possui
+    FIELDS ||--o{ EXTRACTED_VALUES : identifica
+
+    DOCUMENTS ||--o{ EXTRACTIONS : processa
+    DOCUMENTS ||--o{ WORKFLOW_EVENTS : possui
+    DOCUMENTS ||--o{ AUDIT_LOGS : registra
+
+    EXTRACTIONS ||--o{ EXTRACTED_VALUES : gera
+
+    EXTRACTED_VALUES ||--o{ VALIDATIONS : valida
+
+
+    PROFILES {
+        bigint id PK
+        varchar name UK
+        varchar description
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    USERS {
+        bigint id PK
+        bigint profile_id FK
+        varchar name
+        varchar email UK
+        varchar password_hash
+        varchar status
+        timestamptz last_login_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    DOCUMENT_MODELS {
+        bigint id PK
+        varchar name
+        varchar code
+        varchar description
+        integer version
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    FIELDS {
+        bigint id PK
+        bigint document_model_id FK
+        varchar name
+        varchar code
+        varchar data_type
+        boolean is_required
+        boolean is_active
+        integer display_order
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    EXTRACTION_RULES {
+        bigint id PK
+        bigint field_id FK
+        varchar name
+        varchar strategy
+        varchar keyword
+        text pattern
+        jsonb configuration
+        integer priority
+        integer version
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    DOCUMENTS {
+        uuid id PK
+        bigint user_id FK
+        bigint document_model_id FK
+        varchar original_filename
+        varchar stored_filename
+        varchar mime_type
+        varchar extension
+        bigint file_size
+        varchar file_hash UK
+        text storage_path
+        varchar status
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    EXTRACTIONS {
+        uuid id PK
+        uuid document_id FK
+        integer rule_version
+        varchar processor
+        varchar status
+        numeric confidence_score
+        timestamptz started_at
+        timestamptz finished_at
+        bigint processing_time_ms
+        text error_message
+        timestamptz created_at
+    }
+
+    EXTRACTED_VALUES {
+        uuid id PK
+        uuid extraction_id FK
+        bigint field_id FK
+        text raw_value
+        text normalized_value
+        numeric confidence_score
+        integer source_page
+        text source_text
+        timestamptz created_at
+    }
+
+    VALIDATIONS {
+        uuid id PK
+        uuid extracted_value_id FK
+        varchar validation_type
+        varchar status
+        text message
+        timestamptz created_at
+    }
+
+    WORKFLOW_EVENTS {
+        uuid id PK
+        uuid document_id FK
+        bigint user_id FK
+        varchar from_status
+        varchar to_status
+        text comment
+        timestamptz created_at
+    }
+
+    AUDIT_LOGS {
+        bigint id PK
+        bigint user_id FK
+        uuid document_id FK
+        varchar action
+        varchar entity_type
+        varchar entity_id
+        jsonb old_value
+        jsonb new_value
+        inet ip_address
+        timestamptz created_at
+    }
+
+    EXPORTS {
+        uuid id PK
+        bigint user_id FK
+        varchar format
+        jsonb filters
+        integer record_count
+        text file_path
+        varchar status
+        timestamptz created_at
+    }
+
+11.3 Como o processamento funcionará
+
+O DER permite visualizar o ciclo principal do sistema:
+
+USUÁRIO
+   │
+   ▼
+DOCUMENTO
+   │
+   ▼
+CLASSIFICAÇÃO
+   │
+   ▼
+MODELO DOCUMENTAL
+   │
+   ▼
+CAMPOS
+   │
+   ▼
+REGRAS DE EXTRAÇÃO
+   │
+   ▼
+PROCESSAMENTO
+   │
+   ▼
+VALORES EXTRAÍDOS
+   │
+   ▼
+VALIDAÇÃO
+   │
+   ▼
+WORKFLOW
+   │
+   ▼
+EXPORTAÇÃO / INTEGRAÇÃO
+
+Isso é importante porque o banco não está sendo construído simplesmente para "guardar arquivos". Ele representa o processo de negócio do SmartDoc Extractor.
+
+
+---
+
+11.4 Uma decisão importante
+
+Temos agora uma separação clara entre:
+
+Documento
+
+O arquivo original recebido.
+
+DOCUMENTS
+
+Modelo documental
+
+O tipo de documento.
+
+DOCUMENT_MODELS
+
+Campo
+
+A informação que queremos encontrar.
+
+FIELDS
+
+Regra
+
+A estratégia utilizada para encontrar a informação.
+
+EXTRACTION_RULES
+
+Execução
+
+Uma tentativa de processamento.
+
+EXTRACTIONS
+
+Resultado
+
+O dado efetivamente encontrado.
+
+EXTRACTED_VALUES
+
+Validação
+
+A confirmação de que o resultado é válido.
+
+VALIDATIONS
+
+Essa separação será fundamental para tornar o SmartDoc Extractor configurável, em vez de criar uma regra de programação diferente para cada documento.
+
+
+---
+
+11.5 Próximo passo
+
+Agora que temos:
+
+Engenharia de Requisitos;
+
+Documento de Visão do Produto;
+
+SRS;
+
+Modelo Conceitual;
+
+Modelo Lógico;
+
+DER;
+
+
+o próximo passo será:
+
+Capítulo 12 — Projeto Físico do Banco de Dados PostgreSQL
+
+Nele vamos definir efetivamente:
+
+1. CREATE DATABASE;
+
+
+2. schemas;
+
+
+3. tabelas;
+
+
+4. PRIMARY KEY;
+
+
+5. FOREIGN KEY;
+
+
+6. UNIQUE;
+
+
+7. CHECK;
+
+
+8. NOT NULL;
+
+
+9. índices;
+
+
+10. tipos de dados;
+
+
+11. ENUM ou tabelas de domínio;
+
+
+12. estratégia de UUID;
+
+
+13. timestamps;
+
+
+14. constraints;
+
+
+15. script SQL inicial.
+
+
+
+Só depois disso vamos implementar os modelos com SQLAlchemy + Alembic.
+
+Essa é uma boa divisão profissional: primeiro modelamos e validamos; depois transformamos o modelo em código.
