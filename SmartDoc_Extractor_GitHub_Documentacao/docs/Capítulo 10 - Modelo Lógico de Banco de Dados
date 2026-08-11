@@ -1,0 +1,813 @@
+Capítulo 10 — Modelo Lógico do Banco de Dados
+
+Projeto: SmartDoc Extractor
+Versão: 1.0
+Data: Agosto de 2026
+Status: Especificação do Modelo Lógico
+
+---
+
+10.1 Objetivo
+
+O Modelo Lógico do Banco de Dados transforma o Modelo de Dados Conceitual do SmartDoc Extractor em uma estrutura técnica capaz de ser posteriormente implementada em um banco de dados relacional.
+
+O modelo define:
+
+- entidades;
+- tabelas;
+- atributos;
+- chaves primárias;
+- chaves estrangeiras;
+- relacionamentos;
+- cardinalidades;
+- restrições;
+- índices;
+- regras de integridade;
+- estratégia de armazenamento.
+
+O banco de dados inicialmente previsto para o projeto será o PostgreSQL.
+
+A implementação será realizada posteriormente utilizando:
+
+- PostgreSQL;
+- SQLAlchemy;
+- Alembic;
+- Python.
+
+---
+
+10.2 Estratégia de Modelagem
+
+O modelo será desenvolvido priorizando:
+
+- integridade dos dados;
+- normalização;
+- rastreabilidade;
+- auditoria;
+- escalabilidade;
+- flexibilidade para novos tipos documentais;
+- versionamento das regras de extração;
+- suporte a processamento assíncrono;
+- integração com APIs;
+- possibilidade de evolução para recursos de Inteligência Artificial.
+
+O modelo inicial buscará atender à Terceira Forma Normal (3FN).
+
+Eventuais desnormalizações deverão ocorrer somente após identificação de necessidade real de desempenho.
+
+---
+
+10.3 Visão Geral das Tabelas
+
+O modelo lógico inicial será composto pelas seguintes tabelas:
+
+Tabela| Finalidade
+"profiles"| Armazenar perfis de acesso
+"users"| Armazenar usuários
+"document_models"| Definir modelos documentais
+"fields"| Definir campos a serem extraídos
+"extraction_rules"| Definir regras de extração
+"documents"| Registrar documentos recebidos
+"extractions"| Registrar execuções de processamento
+"extracted_values"| Armazenar valores encontrados
+"validations"| Registrar validações
+"workflow_events"| Controlar histórico do workflow
+"audit_logs"| Registrar ações e alterações
+"exports"| Registrar exportações
+
+---
+
+10.4 Tabela "profiles"
+
+Representa os perfis de acesso disponíveis no sistema.
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "BIGSERIAL"| Sim| Não| Sim| Identificador do perfil
+"name"| "VARCHAR(50)"| Não| Não| Sim| Nome do perfil
+"description"| "VARCHAR(255)"| Não| Não| Não| Descrição
+"is_active"| "BOOLEAN"| Não| Não| Sim| Status
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Data de criação
+"updated_at"| "TIMESTAMPTZ"| Não| Não| Sim| Última alteração
+
+Restrições
+
+PK: profiles.id
+UNIQUE: profiles.name
+
+Exemplos de perfis:
+
+Administrador
+Supervisor
+Analista
+Operador
+Auditor
+Consulta
+
+---
+
+10.5 Tabela "users"
+
+Representa os usuários que utilizarão a aplicação.
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "BIGSERIAL"| Sim| Não| Sim| Identificador
+"profile_id"| "BIGINT"| Não| Sim| Sim| Perfil
+"name"| "VARCHAR(150)"| Não| Não| Sim| Nome
+"email"| "VARCHAR(255)"| Não| Não| Sim| E-mail/login
+"password_hash"| "VARCHAR(255)"| Não| Não| Sim| Senha protegida
+"status"| "VARCHAR(20)"| Não| Não| Sim| Status
+"last_login_at"| "TIMESTAMPTZ"| Não| Não| Não| Último acesso
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Criação
+"updated_at"| "TIMESTAMPTZ"| Não| Não| Sim| Alteração
+
+Relacionamento
+
+profiles 1 ───────── N users
+
+Restrições
+
+PK: users.id
+FK: users.profile_id → profiles.id
+UNIQUE: users.email
+
+O sistema não deverá armazenar senhas em texto puro.
+
+---
+
+10.6 Tabela "document_models"
+
+Representa os tipos/modelos documentais que o sistema consegue processar.
+
+Exemplos:
+
+Nota Fiscal
+Boleto
+Contrato
+Laudo
+Relatório
+Comprovante
+Planilha
+Documento personalizado
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "BIGSERIAL"| Sim| Não| Sim| Identificador
+"name"| "VARCHAR(100)"| Não| Não| Sim| Nome
+"code"| "VARCHAR(50)"| Não| Não| Sim| Código
+"description"| "TEXT"| Não| Não| Não| Descrição
+"version"| "INTEGER"| Não| Não| Sim| Versão
+"is_active"| "BOOLEAN"| Não| Não| Sim| Ativo/inativo
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Criação
+"updated_at"| "TIMESTAMPTZ"| Não| Não| Sim| Alteração
+
+Restrições
+
+PK: document_models.id
+UNIQUE: document_models.code + document_models.version
+
+---
+
+10.7 Tabela "fields"
+
+Representa os campos que deverão ser extraídos de cada modelo documental.
+
+Exemplos:
+
+Número NF
+CNPJ Emitente
+Nome Emitente
+CNPJ Destinatário
+Valor Total
+Data de Emissão
+Fornecedor
+Cliente
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "BIGSERIAL"| Sim| Não| Sim| Identificador
+"document_model_id"| "BIGINT"| Não| Sim| Sim| Modelo
+"name"| "VARCHAR(100)"| Não| Não| Sim| Nome do campo
+"code"| "VARCHAR(50)"| Não| Não| Sim| Código
+"data_type"| "VARCHAR(30)"| Não| Não| Sim| Tipo do dado
+"is_required"| "BOOLEAN"| Não| Não| Sim| Obrigatório
+"is_active"| "BOOLEAN"| Não| Não| Sim| Ativo
+"display_order"| "INTEGER"| Não| Não| Sim| Ordem
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Criação
+"updated_at"| "TIMESTAMPTZ"| Não| Não| Sim| Alteração
+
+Relacionamento
+
+document_models 1 ───────── N fields
+
+---
+
+10.8 Tabela "extraction_rules"
+
+Define como cada campo será localizado no documento.
+
+Possíveis estratégias:
+
+KEYWORD
+REGEX
+POSITION
+OCR
+AI
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "BIGSERIAL"| Sim| Não| Sim| Identificador
+"field_id"| "BIGINT"| Não| Sim| Sim| Campo
+"name"| "VARCHAR(100)"| Não| Não| Sim| Nome da regra
+"strategy"| "VARCHAR(30)"| Não| Não| Sim| Estratégia
+"keyword"| "VARCHAR(255)"| Não| Não| Não| Palavra-chave
+"pattern"| "TEXT"| Não| Não| Não| Regex/padrão
+"configuration"| "JSONB"| Não| Não| Não| Configurações
+"priority"| "INTEGER"| Não| Não| Sim| Prioridade
+"version"| "INTEGER"| Não| Não| Sim| Versão
+"is_active"| "BOOLEAN"| Não| Não| Sim| Status
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Criação
+"updated_at"| "TIMESTAMPTZ"| Não| Não| Sim| Alteração
+
+Relacionamento
+
+fields 1 ───────── N extraction_rules
+
+O uso de "JSONB" permitirá armazenar configurações específicas de determinada estratégia sem alterar a estrutura principal da tabela.
+
+---
+
+10.9 Tabela "documents"
+
+Representa cada documento recebido pelo SmartDoc Extractor.
+
+Essa será uma das principais tabelas do sistema.
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "UUID"| Sim| Não| Sim| Identificador
+"user_id"| "BIGINT"| Não| Sim| Sim| Usuário responsável
+"document_model_id"| "BIGINT"| Não| Sim| Não| Modelo identificado
+"original_filename"| "VARCHAR(255)"| Não| Não| Sim| Nome original
+"stored_filename"| "VARCHAR(255)"| Não| Não| Sim| Nome armazenado
+"mime_type"| "VARCHAR(100)"| Não| Não| Sim| MIME type
+"extension"| "VARCHAR(20)"| Não| Não| Sim| Extensão
+"file_size"| "BIGINT"| Não| Não| Sim| Tamanho em bytes
+"file_hash"| "VARCHAR(128)"| Não| Não| Sim| Hash
+"storage_path"| "TEXT"| Não| Não| Sim| Localização
+"status"| "VARCHAR(30)"| Não| Não| Sim| Status
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Recebimento
+"updated_at"| "TIMESTAMPTZ"| Não| Não| Sim| Alteração
+
+Relacionamentos
+
+users 1 ───────── N documents
+
+document_models 1 ───────── N documents
+
+Hash
+
+O campo:
+
+file_hash
+
+será utilizado para identificar possíveis documentos duplicados.
+
+Exemplo:
+
+SHA-256
+
+A regra de negócio será:
+
+Mesmo hash + mesmo conteúdo
+        ↓
+Documento potencialmente duplicado
+
+---
+
+10.10 Tabela "extractions"
+
+Representa cada execução de extração realizada sobre um documento.
+
+Um documento poderá possuir várias execuções.
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "UUID"| Sim| Não| Sim| Identificador
+"document_id"| "UUID"| Não| Sim| Sim| Documento
+"rule_version"| "INTEGER"| Não| Não| Sim| Versão das regras
+"processor"| "VARCHAR(50)"| Não| Não| Sim| Processador
+"status"| "VARCHAR(30)"| Não| Não| Sim| Status
+"confidence_score"| "NUMERIC(5,2)"| Não| Não| Não| Confiança
+"started_at"| "TIMESTAMPTZ"| Não| Não| Sim| Início
+"finished_at"| "TIMESTAMPTZ"| Não| Não| Não| Finalização
+"processing_time_ms"| "BIGINT"| Não| Não| Não| Tempo
+"error_message"| "TEXT"| Não| Não| Não| Erro
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Criação
+
+Relacionamento
+
+documents 1 ───────── N extractions
+
+---
+
+10.11 Tabela "extracted_values"
+
+Armazena os valores encontrados durante uma extração.
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "UUID"| Sim| Não| Sim| Identificador
+"extraction_id"| "UUID"| Não| Sim| Sim| Extração
+"field_id"| "BIGINT"| Não| Sim| Sim| Campo
+"raw_value"| "TEXT"| Não| Não| Não| Valor original
+"normalized_value"| "TEXT"| Não| Não| Não| Valor normalizado
+"confidence_score"| "NUMERIC(5,2)"| Não| Não| Não| Confiança
+"source_page"| "INTEGER"| Não| Não| Não| Página
+"source_text"| "TEXT"| Não| Não| Não| Trecho de origem
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Criação
+
+Relacionamentos
+
+extractions 1 ───────── N extracted_values
+
+fields 1 ───────── N extracted_values
+
+A existência de "raw_value" e "normalized_value" permite preservar o valor original e, simultaneamente, manter uma representação padronizada.
+
+---
+
+10.12 Tabela "validations"
+
+Registra as validações realizadas sobre os dados extraídos.
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "UUID"| Sim| Não| Sim| Identificador
+"extracted_value_id"| "UUID"| Não| Sim| Sim| Valor
+"validation_type"| "VARCHAR(50)"| Não| Não| Sim| Tipo
+"status"| "VARCHAR(20)"| Não| Não| Sim| Resultado
+"message"| "TEXT"| Não| Não| Não| Mensagem
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Data
+
+Exemplos:
+
+CPF
+CNPJ
+DATA
+VALOR
+CAMPO_OBRIGATORIO
+DUPLICIDADE
+REGRA_NEGOCIO
+
+---
+
+10.13 Tabela "workflow_events"
+
+Registra as transições de estado do documento.
+
+Estados previstos
+
+RECEIVED
+PROCESSING
+EXTRACTED
+VALIDATED
+REVIEW
+APPROVED
+REJECTED
+COMPLETED
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "UUID"| Sim| Não| Sim| Identificador
+"document_id"| "UUID"| Não| Sim| Sim| Documento
+"user_id"| "BIGINT"| Não| Sim| Não| Usuário
+"from_status"| "VARCHAR(30)"| Não| Não| Não| Estado anterior
+"to_status"| "VARCHAR(30)"| Não| Não| Sim| Novo estado
+"comment"| "TEXT"| Não| Não| Não| Observação
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Data
+
+Relacionamentos
+
+documents 1 ───────── N workflow_events
+
+users 1 ───────── N workflow_events
+
+---
+
+10.14 Tabela "audit_logs"
+
+Registra ações relevantes realizadas pelos usuários ou pelo sistema.
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "BIGSERIAL"| Sim| Não| Sim| Identificador
+"user_id"| "BIGINT"| Não| Sim| Não| Usuário
+"document_id"| "UUID"| Não| Sim| Não| Documento
+"action"| "VARCHAR(100)"| Não| Não| Sim| Ação
+"entity_type"| "VARCHAR(50)"| Não| Não| Sim| Entidade
+"entity_id"| "VARCHAR(100)"| Não| Não| Sim| ID da entidade
+"old_value"| "JSONB"| Não| Não| Não| Valor anterior
+"new_value"| "JSONB"| Não| Não| Não| Novo valor
+"ip_address"| "INET"| Não| Não| Não| IP
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Data
+
+---
+
+10.15 Tabela "exports"
+
+Registra as exportações realizadas.
+
+Estrutura
+
+Campo| Tipo PostgreSQL| PK| FK| Obrigatório| Descrição
+"id"| "UUID"| Sim| Não| Sim| Identificador
+"user_id"| "BIGINT"| Não| Sim| Sim| Usuário
+"format"| "VARCHAR(20)"| Não| Não| Sim| Formato
+"filters"| "JSONB"| Não| Não| Não| Filtros utilizados
+"record_count"| "INTEGER"| Não| Não| Não| Registros
+"file_path"| "TEXT"| Não| Não| Não| Arquivo
+"status"| "VARCHAR(30)"| Não| Não| Sim| Status
+"created_at"| "TIMESTAMPTZ"| Não| Não| Sim| Data
+
+Formatos inicialmente previstos:
+
+CSV
+XLSX
+JSON
+PDF
+XML
+
+---
+
+10.16 Relacionamentos Principais
+
+A estrutura consolidada pode ser representada da seguinte maneira:
+
+PROFILES
+   │
+   │ 1:N
+   ▼
+USERS
+   │
+   ├───────────────┐
+   │               │
+   │ 1:N           │ 1:N
+   ▼               ▼
+DOCUMENTS       AUDIT_LOGS
+   │
+   ├───────────────► WORKFLOW_EVENTS
+   │
+   │ 1:N
+   ▼
+EXTRACTIONS
+   │
+   │ 1:N
+   ▼
+EXTRACTED_VALUES
+   │
+   │ 1:N
+   ▼
+VALIDATIONS
+
+
+DOCUMENT_MODELS
+   │
+   │ 1:N
+   ▼
+FIELDS
+   │
+   │ 1:N
+   ▼
+EXTRACTION_RULES
+
+
+USERS
+   │
+   │ 1:N
+   ▼
+EXPORTS
+
+---
+
+10.17 Cardinalidades
+
+Relacionamento| Cardinalidade
+Profile → Users| 1:N
+User → Documents| 1:N
+User → Audit Logs| 1:N
+User → Workflow Events| 1:N
+User → Exports| 1:N
+Document Model → Documents| 1:N
+Document Model → Fields| 1:N
+Field → Extraction Rules| 1:N
+Document → Extractions| 1:N
+Extraction → Extracted Values| 1:N
+Field → Extracted Values| 1:N
+Extracted Value → Validations| 1:N
+Document → Workflow Events| 1:N
+Document → Audit Logs| 1:N
+
+---
+
+10.18 Índices
+
+Os principais índices inicialmente previstos são:
+
+users.email
+documents.file_hash
+documents.status
+documents.created_at
+documents.document_model_id
+documents.user_id
+extractions.document_id
+extractions.created_at
+extracted_values.extraction_id
+extracted_values.field_id
+workflow_events.document_id
+workflow_events.created_at
+audit_logs.document_id
+audit_logs.created_at
+exports.user_id
+exports.created_at
+
+Índice crítico
+
+O campo:
+
+documents.file_hash
+
+deverá possuir uma restrição "UNIQUE", quando compatível com a estratégia de duplicidade adotada.
+
+---
+
+10.19 Integridade Referencial
+
+As chaves estrangeiras deverão garantir a integridade entre as entidades.
+
+Exemplo:
+
+users.profile_id
+        ↓
+profiles.id
+
+Não deverá ser possível associar um usuário a um perfil inexistente.
+
+Outro exemplo:
+
+extractions.document_id
+        ↓
+documents.id
+
+Uma extração não poderá existir sem um documento correspondente.
+
+---
+
+10.20 Estratégia para Exclusão
+
+Por se tratar de um sistema com requisitos de auditoria e rastreabilidade, a exclusão física de registros deverá ser utilizada com cautela.
+
+Para entidades críticas, recomenda-se priorizar:
+
+is_active
+status
+soft delete
+
+ou mecanismos equivalentes.
+
+Documentos e seus registros históricos não deverão ser simplesmente removidos quando houver necessidade de preservação para auditoria.
+
+A política definitiva de retenção deverá ser definida posteriormente conforme os requisitos do negócio e da LGPD.
+
+---
+
+10.21 Tipos de Dados
+
+A escolha dos tipos deverá seguir os seguintes princípios:
+
+Identificadores
+
+BIGINT
+UUID
+
+"UUID" será utilizado principalmente para entidades relacionadas diretamente aos documentos e ao processamento, reduzindo exposição de identificadores sequenciais.
+
+Datas
+
+TIMESTAMPTZ
+
+Será utilizado para manter informações de data e hora com timezone.
+
+Valores monetários
+
+Quando necessário, utilizar:
+
+NUMERIC
+
+evitando "FLOAT" para valores financeiros.
+
+Configurações flexíveis
+
+Utilizar:
+
+JSONB
+
+quando a estrutura puder variar, como configurações de regras, filtros e dados de auditoria.
+
+---
+
+10.22 Segurança
+
+O modelo deverá considerar:
+
+- senhas armazenadas somente como hash;
+- controle de acesso por perfil;
+- auditoria;
+- rastreamento de alterações;
+- proteção das credenciais;
+- separação de dados sensíveis;
+- controle de acesso ao armazenamento dos documentos;
+- backups;
+- criptografia em trânsito;
+- políticas de retenção.
+
+A implementação de autenticação e autorização será detalhada posteriormente na arquitetura da aplicação e na especificação da API.
+
+---
+
+10.23 Escalabilidade
+
+O modelo deverá suportar crescimento de:
+
+- usuários;
+- documentos;
+- extrações;
+- valores extraídos;
+- logs;
+- auditorias;
+- exportações.
+
+Como algumas tabelas poderão crescer rapidamente, especialmente:
+
+documents
+extractions
+extracted_values
+workflow_events
+audit_logs
+
+deveremos considerar posteriormente:
+
+- índices adequados;
+- paginação;
+- consultas otimizadas;
+- arquivamento;
+- particionamento, se necessário;
+- processamento assíncrono.
+
+Não será adotado particionamento prematuramente. Essa decisão deverá ser baseada em métricas reais de volume e desempenho.
+
+---
+
+10.24 Evolução para Inteligência Artificial
+
+O modelo foi estruturado para permitir evolução futura.
+
+As entidades:
+
+extraction_rules
+extractions
+extracted_values
+
+podem posteriormente suportar informações relacionadas a:
+
+- modelo de IA;
+- versão do modelo;
+- confiança;
+- estratégia utilizada;
+- resultado do processamento;
+- feedback humano;
+- correções;
+- aprendizado supervisionado.
+
+Isso permitirá que o SmartDoc Extractor evolua de uma solução baseada em:
+
+Palavras-chave
+      ↓
+Regex
+      ↓
+OCR
+
+para:
+
+Classificação
+      ↓
+NLP
+      ↓
+Modelos de IA
+      ↓
+Extração inteligente
+      ↓
+Feedback humano
+      ↓
+Melhoria contínua
+
+---
+
+10.25 Mapeamento Requisito → Banco
+
+Requisito| Tabelas relacionadas
+RF01 Upload| "documents"
+RF02 Upload em massa| "documents"
+RF03 Monitoramento| "documents"
+RF04 Identificação| "documents", "document_models"
+RF05 OCR| "extractions", "extracted_values"
+RF06 Extração inteligente| "extraction_rules", "extractions", "extracted_values"
+RF07 Campos configuráveis| "fields"
+RF08 Regras de extração| "extraction_rules"
+RF09 Validação| "validations"
+RF10 Banco de dados| Todas
+RF11 Pesquisa| "documents", "extracted_values"
+RF12 Exportação| "exports"
+RF13 Dashboard| Dados de processamento
+RF14 Histórico| "workflow_events", "audit_logs"
+RF15 Logs| "audit_logs"
+RF16 Workflow| "workflow_events"
+RF17 Integrações| Dados persistidos/API
+RF18 Notificações| Eventos de workflow/processamento
+RF19 IA| "extraction_rules", "extractions", "extracted_values"
+
+---
+
+10.26 Resultado do Modelo Lógico
+
+Ao final deste capítulo, temos uma estrutura relacional definida para o SmartDoc Extractor:
+
+profiles
+   ↓
+users
+   ↓
+documents
+   ├── extractions
+   │      └── extracted_values
+   │             └── validations
+   │
+   ├── workflow_events
+   │
+   └── audit_logs
+
+document_models
+   ↓
+fields
+   ↓
+extraction_rules
+
+users
+   ↓
+exports
+
+Este modelo representa a base de persistência da plataforma.
+
+---
+
+10.27 Próxima Etapa
+
+O próximo artefato será:
+
+Capítulo 11 — Diagrama Entidade-Relacionamento (DER)
+
+Nesta etapa iremos transformar o modelo lógico em uma representação visual contendo:
+
+- entidades;
+- atributos principais;
+- PKs;
+- FKs;
+- relacionamentos;
+- cardinalidades.
+
+Depois do DER, avançaremos para:
+
+Capítulo 11 — DER
+        ↓
+Capítulo 12 — PostgreSQL
+        ↓
+Capítulo 13 — SQLAlchemy
+        ↓
+Capítulo 14 — Alembic/Migrations
+        ↓
+Capítulo 15 — Implementação do Banco
+        ↓
+Sprint 1 — Upload e Extração de PDF
+
+Importante: o banco ainda não será criado neste capítulo. Primeiro validaremos o modelo lógico e o DER para evitar que decisões de implementação antecipadas provoquem retrabalho.
