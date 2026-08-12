@@ -1,0 +1,168 @@
+erDiagram
+
+    PROFILES ||--o{ USERS : possui
+
+    USERS ||--o{ DOCUMENTS : envia
+    USERS ||--o{ WORKFLOW_EVENTS : executa
+    USERS ||--o{ AUDIT_LOGS : realiza
+    USERS ||--o{ EXPORTS : solicita
+
+    DOCUMENT_MODELS ||--o{ DOCUMENTS : classifica
+    DOCUMENT_MODELS ||--o{ FIELDS : possui
+
+    FIELDS ||--o{ EXTRACTION_RULES : possui
+    FIELDS ||--o{ EXTRACTED_VALUES : identifica
+
+    DOCUMENTS ||--o{ EXTRACTIONS : processa
+    DOCUMENTS ||--o{ WORKFLOW_EVENTS : possui
+    DOCUMENTS ||--o{ AUDIT_LOGS : registra
+
+    EXTRACTIONS ||--o{ EXTRACTED_VALUES : gera
+
+    EXTRACTED_VALUES ||--o{ VALIDATIONS : valida
+
+
+    PROFILES {
+        bigint id PK
+        varchar name UK
+        varchar description
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    USERS {
+        bigint id PK
+        bigint profile_id FK
+        varchar name
+        varchar email UK
+        varchar password_hash
+        varchar status
+        timestamptz last_login_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    DOCUMENT_MODELS {
+        bigint id PK
+        varchar name
+        varchar code
+        varchar description
+        integer version
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    FIELDS {
+        bigint id PK
+        bigint document_model_id FK
+        varchar name
+        varchar code
+        varchar data_type
+        boolean is_required
+        boolean is_active
+        integer display_order
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    EXTRACTION_RULES {
+        bigint id PK
+        bigint field_id FK
+        varchar name
+        varchar strategy
+        varchar keyword
+        text pattern
+        jsonb configuration
+        integer priority
+        integer version
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    DOCUMENTS {
+        uuid id PK
+        bigint user_id FK
+        bigint document_model_id FK
+        varchar original_filename
+        varchar stored_filename
+        varchar mime_type
+        varchar extension
+        bigint file_size
+        varchar file_hash UK
+        text storage_path
+        varchar status
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    EXTRACTIONS {
+        uuid id PK
+        uuid document_id FK
+        integer rule_version
+        varchar processor
+        varchar status
+        numeric confidence_score
+        timestamptz started_at
+        timestamptz finished_at
+        bigint processing_time_ms
+        text error_message
+        timestamptz created_at
+    }
+
+    EXTRACTED_VALUES {
+        uuid id PK
+        uuid extraction_id FK
+        bigint field_id FK
+        text raw_value
+        text normalized_value
+        numeric confidence_score
+        integer source_page
+        text source_text
+        timestamptz created_at
+    }
+
+    VALIDATIONS {
+        uuid id PK
+        uuid extracted_value_id FK
+        varchar validation_type
+        varchar status
+        text message
+        timestamptz created_at
+    }
+
+    WORKFLOW_EVENTS {
+        uuid id PK
+        uuid document_id FK
+        bigint user_id FK
+        varchar from_status
+        varchar to_status
+        text comment
+        timestamptz created_at
+    }
+
+    AUDIT_LOGS {
+        bigint id PK
+        bigint user_id FK
+        uuid document_id FK
+        varchar action
+        varchar entity_type
+        varchar entity_id
+        jsonb old_value
+        jsonb new_value
+        inet ip_address
+        timestamptz created_at
+    }
+
+    EXPORTS {
+        uuid id PK
+        bigint user_id FK
+        varchar format
+        jsonb filters
+        integer record_count
+        text file_path
+        varchar status
+        timestamptz created_at
+    }
