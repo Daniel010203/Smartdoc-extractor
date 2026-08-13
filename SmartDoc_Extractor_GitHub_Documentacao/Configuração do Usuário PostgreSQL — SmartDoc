@@ -1,0 +1,374 @@
+# Configuração do Usuário PostgreSQL — SmartDoc
+
+**Projeto:** SmartDoc
+**SGBD:** PostgreSQL
+**Schema principal:** `smartdoc`
+**Usuário da aplicação:** `smartdoc_app`
+**Documento:** Configuração e validação do usuário do SGBD
+
+---
+
+## 1. Objetivo
+
+Este documento descreve a configuração do usuário responsável pelo acesso da aplicação SmartDoc ao banco de dados PostgreSQL.
+
+O objetivo é estabelecer uma separação entre:
+
+* usuário administrador do PostgreSQL;
+* usuário utilizado pela aplicação;
+* schema específico da aplicação;
+* permissões necessárias para funcionamento do sistema.
+
+Essa abordagem segue o princípio de **menor privilégio**, evitando que a aplicação utilize diretamente uma conta administrativa do banco de dados.
+
+---
+
+## 2. Estrutura de acesso
+
+A estrutura configurada é:
+
+```text
+PostgreSQL
+│
+├── Banco de dados
+│
+├── Schema: public
+│   └── Owner: pg_database_owner
+│
+└── Schema: smartdoc
+    └── Owner: smartdoc_app
+        ├── USAGE: true
+        └── CREATE: true
+```
+
+O usuário `smartdoc_app` será utilizado posteriormente pela aplicação SmartDoc para acessar os objetos pertencentes ao schema `smartdoc`.
+
+---
+
+## 3. Usuário da aplicação
+
+Foi criado o usuário:
+
+```text
+smartdoc_app
+```
+
+Esse usuário representa a identidade utilizada pela aplicação para se conectar ao PostgreSQL.
+
+### Importante
+
+A senha do usuário **não deve ser armazenada neste documento nem versionada no GitHub**.
+
+A senha deverá ser armazenada posteriormente por meio de:
+
+* variável de ambiente;
+* arquivo `.env` não versionado;
+* gerenciador de secrets;
+* mecanismo seguro equivalente.
+
+---
+
+## 4. Schema da aplicação
+
+Foi utilizado o schema:
+
+```text
+smartdoc
+```
+
+O schema é de propriedade do usuário:
+
+```text
+smartdoc_app
+```
+
+A consulta utilizada para verificar os proprietários foi:
+
+```sql
+SELECT
+    nspname AS schema,
+    pg_get_userbyid(nspowner) AS owner
+FROM pg_namespace
+WHERE nspname IN ('public', 'smartdoc');
+```
+
+Resultado obtido:
+
+```text
+schema   | owner
+---------+----------------
+public   | pg_database_owner
+smartdoc | smartdoc_app
+```
+
+---
+
+## 5. Permissões do usuário
+
+Foram verificadas as permissões do usuário `smartdoc_app` sobre o schema `smartdoc`.
+
+Consulta utilizada:
+
+```sql
+SELECT
+    has_schema_privilege(
+        'smartdoc_app',
+        'smartdoc',
+        'USAGE'
+    ) AS uso_schema,
+
+    has_schema_privilege(
+        'smartdoc_app',
+        'smartdoc',
+        'CREATE'
+    ) AS criar_no_schema;
+```
+
+Resultado esperado e obtido:
+
+```text
+uso_schema | criar_no_schema
+-----------+----------------
+true       | true
+```
+
+### Interpretação
+
+#### USAGE
+
+A permissão:
+
+```text
+USAGE = true
+```
+
+permite que o usuário utilize objetos dentro do schema conforme as demais permissões existentes.
+
+#### CREATE
+
+A permissão:
+
+```text
+CREATE = true
+```
+
+permite que o usuário crie objetos dentro do schema, como tabelas, sequences, views e outros objetos compatíveis com o PostgreSQL.
+
+---
+
+## 6. Teste de criação de tabela
+
+Foi realizada uma validação prática das permissões criando uma tabela temporária de teste dentro do schema `smartdoc`.
+
+```sql
+CREATE TABLE smartdoc.teste_conexao (
+    id SERIAL PRIMARY KEY,
+    descricao VARCHAR(100) NOT NULL
+);
+```
+
+A operação foi executada com sucesso.
+
+---
+
+## 7. Teste de inserção
+
+Após a criação da tabela, foi realizado um teste de inserção:
+
+```sql
+INSERT INTO smartdoc.teste_conexao (descricao)
+VALUES ('Teste de conexão do SmartDoc');
+```
+
+A operação foi executada com sucesso.
+
+---
+
+## 8. Teste de consulta
+
+Foi realizada uma consulta para verificar o registro inserido:
+
+```sql
+SELECT * FROM smartdoc.teste_conexao;
+```
+
+O registro de teste foi retornado corretamente.
+
+---
+
+## 9. Remoção da tabela de teste
+
+Após a conclusão dos testes, a tabela foi removida para evitar que objetos de teste permanecessem no banco de dados.
+
+```sql
+DROP TABLE smartdoc.teste_conexao;
+```
+
+Resultado:
+
+```text
+DROP TABLE
+
+Query returned successfully
+```
+
+Portanto, a tabela de teste foi removida com sucesso.
+
+---
+
+## 10. Resultado da validação
+
+A configuração foi considerada válida após a realização dos seguintes testes:
+
+| Teste                               | Resultado |
+| ----------------------------------- | --------- |
+| Usuário `smartdoc_app` criado       | ✅         |
+| Schema `smartdoc` criado            | ✅         |
+| `smartdoc_app` como owner do schema | ✅         |
+| Permissão `USAGE`                   | ✅         |
+| Permissão `CREATE`                  | ✅         |
+| Criação de tabela                   | ✅         |
+| Inserção de registro                | ✅         |
+| Consulta de registro                | ✅         |
+| Exclusão da tabela de teste         | ✅         |
+
+---
+
+## 11. Segurança
+
+A aplicação SmartDoc não deverá utilizar o usuário administrador do PostgreSQL para suas operações normais.
+
+A utilização de um usuário específico para a aplicação proporciona:
+
+* isolamento das operações da aplicação;
+* redução do impacto de possíveis comprometimentos;
+* melhor controle de permissões;
+* rastreabilidade;
+* aplicação do princípio do menor privilégio;
+* separação entre administração do SGBD e operação da aplicação.
+
+### Regra
+
+**Nunca armazenar senhas, tokens ou credenciais diretamente no código-fonte.**
+
+Exemplo de informação que **não deve** ser versionada:
+
+```text
+DB_PASSWORD=minha_senha
+```
+
+O arquivo `.env` deverá ser incluído no `.gitignore`.
+
+Exemplo:
+
+```gitignore
+.env
+*.env
+```
+
+---
+
+## 12. Configuração futura da aplicação
+
+Quando iniciarmos a integração do PostgreSQL com o backend Python, as credenciais deverão ser fornecidas por variáveis de ambiente.
+
+Exemplo conceitual:
+
+```text
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=smartdoc
+DB_USER=smartdoc_app
+DB_PASSWORD=<armazenada de forma segura>
+```
+
+A aplicação utilizará essas informações para estabelecer a conexão com o PostgreSQL.
+
+A implementação dessa conexão será realizada posteriormente utilizando **SQLAlchemy**.
+
+---
+
+## 13. Arquitetura de acesso
+
+A arquitetura prevista é:
+
+```text
+┌──────────────────────────────┐
+│          SmartDoc            │
+│       Aplicação Flask        │
+└──────────────┬───────────────┘
+               │
+               │ SQLAlchemy
+               │
+               ▼
+┌──────────────────────────────┐
+│          PostgreSQL          │
+│                              │
+│       Usuário:               │
+│       smartdoc_app           │
+│                              │
+│       Schema:                │
+│       smartdoc               │
+└──────────────────────────────┘
+```
+
+O acesso da aplicação será realizado pelo usuário específico:
+
+```text
+smartdoc_app
+```
+
+e os objetos da aplicação ficarão organizados no schema:
+
+```text
+smartdoc
+```
+
+---
+
+## 14. Próxima etapa
+
+Com a configuração do usuário e do schema validada, o próximo passo será implementar o **Modelo Lógico do Banco de Dados do SmartDoc** no PostgreSQL.
+
+A sequência prevista é:
+
+```text
+Modelo Lógico
+      ↓
+DDL PostgreSQL
+      ↓
+Tabelas
+      ↓
+Primary Keys
+      ↓
+Foreign Keys
+      ↓
+Constraints
+      ↓
+Índices
+      ↓
+Triggers, quando necessários
+      ↓
+Dados iniciais
+      ↓
+Testes do banco
+      ↓
+SQLAlchemy
+      ↓
+Flask
+```
+
+---
+
+## 15. Status
+
+**Status:** ✅ Concluído
+
+A configuração básica do usuário `smartdoc_app` e do schema `smartdoc` foi realizada e validada com sucesso.
+
+---
+
+**Projeto:** SmartDoc
+**Tecnologia:** PostgreSQL
+**Área:** Banco de Dados / Infraestrutura
+**Etapa:** Configuração e segurança de acesso ao SGBD
