@@ -1,0 +1,531 @@
+SmartDoc Extractor
+Software Requirements Specification (SRS)
+Capítulo 13 – Arquitetura e Gestão do Fluxo de Dados
+Versão: 1.0
+13.1 Objetivo
+Definir como os dados percorrem o SmartDoc Extractor desde a entrada do documento até sua disponibilização, estabelecendo mecanismos para validação, tratamento, normalização, persistência, processamento assíncrono, controle de concorrência, recuperação de falhas e geração das saídas.
+Este capítulo complementa o Modelo de Dados Conceitual e a Arquitetura da Solução já definidos no projeto.
+O objetivo é garantir que o sistema possa processar documentos de diferentes formatos de maneira controlada, previsível, rastreável e preparada para evolução de volume.
+13.2 Escopo do Fluxo de Dados
+O fluxo contempla:
+recebimento de documentos;
+identificação do formato;
+validação inicial;
+armazenamento do arquivo original;
+geração de identificadores e hash;
+classificação documental;
+extração de dados;
+OCR quando necessário;
+normalização;
+validação dos dados extraídos;
+persistência;
+atualização do status do processamento;
+exportação e disponibilização dos dados;
+registro de logs e auditoria;
+tratamento de falhas e reprocessamento.
+13.3 Modelo Conceitual do Fluxo
+DADOS DE ENTRADA
+                           │
+                           ▼
+                  ┌─────────────────┐
+                  │ Recepção        │
+                  │ do Documento    │
+                  └────────┬────────┘
+                           │
+                           ▼
+                  ┌─────────────────┐
+                  │ Validação       │
+                  │ Inicial         │
+                  └────────┬────────┘
+                           │
+                    Documento válido?
+                       /          \
+                     NÃO          SIM
+                     │             │
+                     ▼             ▼
+                Rejeição       Armazenamento
+                + Log          do Original
+                                   │
+                                   ▼
+                            Classificação
+                                   │
+                                   ▼
+                         Seleção do Processor
+                                   │
+                                   ▼
+                         Extração / OCR
+                                   │
+                                   ▼
+                            Normalização
+                                   │
+                                   ▼
+                         Validação dos Dados
+                                   │
+                                   ▼
+                            Persistência
+                                   │
+                                   ▼
+                       Disponibilização / API
+                                   │
+                    ┌──────────────┼──────────────┐
+                    ▼              ▼              ▼
+                  JSON           Excel          CSV
+                    │              │              │
+                    └──────────────┼──────────────┘
+                                   ▼
+                               Dashboard
+13.4 Dados de Entrada
+O SmartDoc Extractor deverá ser preparado para receber diferentes formatos documentais.
+Formatos previstos
+Formato
+Tratamento
+PDF
+Extração de texto e/ou OCR
+XML
+Leitura estruturada
+Excel
+Leitura tabular
+CSV
+Leitura tabular
+Word
+Extração de conteúdo
+TXT
+Leitura textual
+Imagem
+OCR
+Outros
+Rejeição ou processamento futuro por plugin
+A arquitetura do projeto já prevê processadores independentes para esses formatos, permitindo que cada tipo de documento seja tratado por um componente especializado.
+13.5 Validação da Entrada
+Antes de iniciar o processamento, o sistema deverá realizar validações básicas.
+Validações
+extensão do arquivo;
+MIME type;
+tamanho máximo permitido;
+integridade do arquivo;
+formato suportado;
+existência de conteúdo;
+nome do arquivo;
+hash SHA-256;
+identificação de documento duplicado.
+Fluxo
+Arquivo recebido
+       │
+       ▼
+Extensão válida?
+       │
+       ▼
+MIME válido?
+       │
+       ▼
+Tamanho permitido?
+       │
+       ▼
+Arquivo íntegro?
+       │
+       ▼
+Documento duplicado?
+       │
+       ├── SIM → tratar duplicidade
+       │
+       └── NÃO → continuar processamento
+13.6 Armazenamento do Documento Original
+O arquivo original deverá ser preservado antes do processamento sempre que a política de armazenamento do sistema permitir.
+A entidade Documento representa o documento lógico, enquanto Arquivo representa o arquivo físico, permitindo futura utilização de:
+armazenamento local;
+Amazon S3;
+Azure Blob Storage;
+Google Cloud Storage.
+Essa separação já está prevista no Modelo de Dados Conceitual.
+13.7 Identificação e Idempotência
+Cada documento deverá possuir uma identificação única.
+O hash_sha256 deverá ser utilizado como mecanismo auxiliar para identificação de conteúdo duplicado.
+Arquivo
+   │
+   ▼
+SHA-256
+   │
+   ▼
+Consulta
+   │
+   ├── Encontrado → documento potencialmente duplicado
+   │
+   └── Não encontrado → continuar
+A idempotência deverá impedir que o mesmo documento seja processado repetidamente de forma desnecessária.
+13.8 Modelo de Dados Intermediário
+O sistema não deverá depender de uma transformação direta entre o arquivo original e as tabelas finais.
+O processamento será conceitualmente dividido em estágios:
+Documento Original
+        │
+        ▼
+Dados Brutos
+        │
+        ▼
+Dados Extraídos
+        │
+        ▼
+Dados Normalizados
+        │
+        ▼
+Dados Validados
+        │
+        ▼
+Dados Persistidos
+13.8.1 Dados Brutos
+Representam o conteúdo obtido diretamente do documento ou do mecanismo de leitura/OCR.
+13.8.2 Dados Extraídos
+Representam os campos identificados pelo processador ou pelas regras de extração.
+13.8.3 Dados Normalizados
+Representam os dados convertidos para padrões internos do sistema.
+Exemplos:
+datas em formato padronizado;
+valores monetários em formato numérico;
+CNPJ sem caracteres de formatação;
+textos tratados;
+campos com nomes padronizados.
+13.8.4 Dados Validados
+Representam os dados que passaram pelas regras de validação aplicáveis.
+O sistema deverá preservar informações suficientes para rastrear a origem e o resultado da extração.
+13.9 Pipeline de Processamento
+O pipeline principal será:
+Recepção
+   ↓
+Validação
+   ↓
+Armazenamento
+   ↓
+Classificação
+   ↓
+Seleção do Processador
+   ↓
+Extração
+   ↓
+OCR (quando necessário)
+   ↓
+Aplicação das Regras
+   ↓
+Normalização
+   ↓
+Validação
+   ↓
+Persistência
+   ↓
+Disponibilização
+Esse pipeline deverá ser modular, permitindo adicionar ou substituir processadores sem alterar o núcleo da aplicação.
+13.10 Processamento Síncrono e Assíncrono
+Processamento síncrono
+Adequado para operações rápidas, como:
+validação inicial;
+identificação do formato;
+geração do hash;
+criação do registro inicial;
+consulta de status.
+Processamento assíncrono
+Recomendado para operações potencialmente demoradas, como:
+OCR;
+processamento de grandes arquivos;
+processamento em lote;
+extrações complexas;
+geração de grandes exportações.
+Conceitualmente:
+Cliente
+   │
+   ▼
+API
+   │
+   ▼
+Fila
+   │
+   ▼
+Worker
+   │
+   ▼
+Document Processing Engine
+   │
+   ├── Processor
+   ├── OCR
+   ├── Rules Engine
+   └── Validation Engine
+   │
+   ▼
+PostgreSQL
+A arquitetura do projeto já prevê RabbitMQ para filas e Redis como infraestrutura de apoio na evolução para maior escalabilidade.
+13.11 Controle de Concorrência
+O sistema deverá controlar a quantidade de documentos processados simultaneamente.
+O objetivo é evitar:
+consumo excessivo de memória;
+saturação de CPU;
+excesso de conexões com o banco;
+sobrecarga dos mecanismos de OCR;
+indisponibilidade da API.
+A capacidade de processamento deverá ser configurável por ambiente.
+Fila
+ │
+ ├── Documento 1 ── Worker 1
+ ├── Documento 2 ── Worker 2
+ ├── Documento 3 ── Worker 3
+ ├── Documento 4 ── aguardando
+ └── Documento 5 ── aguardando
+13.12 Controle de Memória
+O processamento deverá considerar o tamanho dos arquivos.
+Sempre que possível, deverão ser utilizados mecanismos de:
+leitura incremental;
+streaming;
+processamento por páginas;
+processamento por blocos;
+descarte de objetos temporários após utilização.
+O objetivo é evitar que arquivos grandes sejam carregados integralmente na memória sem necessidade.
+13.13 Estados do Processamento
+O documento deverá possuir estados que permitam acompanhar seu ciclo de vida.
+Estados propostos
+RECEBIDO
+   ↓
+VALIDANDO
+   ↓
+AGUARDANDO_PROCESSAMENTO
+   ↓
+PROCESSANDO
+   ↓
+EXTRAINDO
+   ↓
+VALIDANDO_DADOS
+   ↓
+CONCLUIDO
+Em caso de falha:
+PROCESSANDO
+     ↓
+    ERRO
+     ↓
+ RETENTATIVA
+     ↓
+PROCESSANDO
+Após exceder o limite de tentativas:
+ERRO
+  ↓
+ERRO_DEFINITIVO
+Os estados deverão ser posteriormente refinados durante o Modelo Lógico e o DDL do PostgreSQL.
+13.14 Tratamento de Erros
+As falhas deverão ser classificadas sempre que possível.
+Categorias
+erro de entrada;
+arquivo corrompido;
+formato não suportado;
+erro de OCR;
+erro de extração;
+erro de validação;
+erro de persistência;
+erro de integração;
+erro interno.
+Cada falha deverá gerar informações suficientes para diagnóstico sem expor dados sensíveis desnecessariamente.
+13.15 Retentativas
+Falhas temporárias poderão ser submetidas a novas tentativas.
+Processamento
+      ↓
+    Falha
+      ↓
+   Retry 1
+      ↓
+    Falha
+      ↓
+   Retry 2
+      ↓
+    Falha
+      ↓
+   Retry 3
+      ↓
+Erro definitivo
+O número máximo de tentativas deverá ser configurável.
+Não deverão ser realizadas retentativas indiscriminadas para erros permanentes, como formato inválido ou arquivo corrompido.
+13.16 Dead Letter Queue
+Documentos que não puderem ser processados após o limite de tentativas poderão ser encaminhados para uma fila de tratamento de falhas.
+Fila Principal
+      │
+      ▼
+   Worker
+      │
+      ▼
+    Falha
+      │
+      ▼
+ Limite de Retry?
+   /        \
+ NÃO        SIM
+ │           │
+ ▼           ▼
+Retry       DLQ
+             │
+             ▼
+       Análise / Reprocessamento
+A implementação dessa estratégia será considerada principalmente na fase de processamento assíncrono.
+13.17 Reprocessamento
+O sistema deverá permitir que documentos com erro possam ser reprocessados quando aplicável.
+O reprocessamento deverá:
+preservar o histórico anterior;
+registrar a nova tentativa;
+identificar o motivo do reprocessamento;
+evitar perda do documento original;
+atualizar o status atual;
+permitir auditoria.
+13.18 Rastreabilidade
+Cada etapa relevante deverá produzir informações de rastreabilidade.
+Deverão ser considerados:
+documento;
+usuário ou processo responsável;
+data e hora;
+etapa;
+status;
+duração;
+resultado;
+erro;
+tentativa;
+versão do processamento.
+Isso complementará as entidades Log, Auditoria e Workflow previstas no Modelo de Dados Conceitual.
+13.19 Observabilidade
+A evolução do sistema deverá considerar mecanismos para acompanhar:
+quantidade de documentos recebidos;
+quantidade processada;
+quantidade em fila;
+quantidade com erro;
+tempo médio de processamento;
+taxa de sucesso;
+taxa de falha;
+quantidade de retentativas;
+utilização dos workers.
+Na arquitetura atual, Prometheus e Grafana estão previstos como mecanismos de observabilidade para evolução futura.
+13.20 Estrutura das Saídas
+Os dados processados poderão ser disponibilizados por diferentes canais.
+API
+{
+  "documento_id": "uuid",
+  "status": "CONCLUIDO",
+  "campos": [
+    {
+      "nome": "cnpj",
+      "valor": "12345678000199",
+      "confianca": 0.98
+    }
+  ]
+}
+Excel
+Estrutura tabular destinada a análise e utilização operacional.
+CSV
+Estrutura tabular simples para integração e processamento posterior.
+JSON
+Formato estruturado destinado principalmente a APIs e integrações.
+Dashboard
+Apresentação dos indicadores e informações consolidadas.
+13.21 Estratégia para Evitar Travamentos
+O sistema deverá evitar que operações pesadas bloqueiem a camada responsável pelo atendimento das requisições.
+Princípios:
+validação rápida na entrada;
+processamento pesado fora da requisição web;
+uso de filas para operações demoradas;
+limite de workers concorrentes;
+controle de tamanho de arquivos;
+leitura incremental quando aplicável;
+timeout para operações externas;
+retentativas controladas;
+registro de erros;
+monitoramento da fila e dos workers.
+O princípio arquitetural será:
+REQUISIÇÃO WEB
+      │
+      ├── Operações rápidas → execução imediata
+      │
+      └── Operações pesadas → fila → worker
+Dessa forma, o usuário não dependerá da conclusão de todo o processamento para receber uma resposta inicial da aplicação.
+13.22 Impacto no Modelo de Dados
+A definição deste fluxo poderá exigir refinamentos no Modelo de Dados Conceitual e no Modelo Lógico.
+Possíveis estruturas adicionais ou ajustes:
+tentativa de processamento;
+etapa de processamento;
+status;
+erro;
+duração;
+versão do processamento;
+origem do documento;
+identificação do worker;
+histórico de reprocessamento.
+Essas alterações deverão ser avaliadas antes da criação do DDL definitivo do schema smartdoc.
+13.23 Relação com a Arquitetura da Solução
+O fluxo de dados utilizará os componentes definidos na arquitetura do sistema:
+Interface Web
+      │
+      ▼
+API / Application Layer
+      │
+      ▼
+Upload Service
+      │
+      ▼
+Document Processing Engine
+      │
+      ├── PDF Processor
+      ├── XML Processor
+      ├── Excel Processor
+      ├── Word Processor
+      ├── Image Processor
+      └── OCR Processor
+      │
+      ▼
+Rules Engine
+      │
+      ▼
+Validation Engine
+      │
+      ▼
+PostgreSQL
+      │
+      ├── API
+      ├── Export Engine
+      └── Dashboard
+13.24 Diretrizes de Escalabilidade
+A arquitetura deverá permitir evolução gradual.
+MVP
+processamento local;
+número limitado de workers;
+armazenamento local;
+processamento síncrono para operações rápidas;
+processamento assíncrono apenas quando necessário.
+Evolução
+RabbitMQ;
+Redis;
+múltiplos workers;
+armazenamento em objeto;
+processamento distribuído;
+monitoramento com Prometheus/Grafana;
+escalabilidade horizontal.
+A adoção dessas tecnologias deverá ocorrer conforme a necessidade real do sistema, evitando complexidade prematura no MVP.
+13.25 Princípios Arquiteturais
+O fluxo de dados deverá seguir os seguintes princípios:
+Integridade: dados não devem ser alterados silenciosamente.
+Rastreabilidade: etapas relevantes devem ser registradas.
+Idempotência: reprocessamentos não devem gerar duplicações indevidas.
+Resiliência: falhas isoladas não devem comprometer todo o sistema.
+Desacoplamento: processamento pesado deve ser separado da camada web.
+Escalabilidade: a capacidade de processamento deve poder crescer.
+Observabilidade: o comportamento do pipeline deve ser mensurável.
+Segurança: arquivos e dados devem ser tratados conforme as políticas de segurança do sistema.
+Auditabilidade: operações relevantes devem possuir histórico.
+Extensibilidade: novos processadores devem poder ser adicionados sem modificar o núcleo.
+13.26 Critérios para a Implementação
+Antes da implementação definitiva, deverão estar definidos:
+limite de tamanho dos arquivos;
+formatos aceitos;
+estados do documento;
+política de retentativas;
+quantidade máxima de workers;
+política de duplicidade;
+estratégia de armazenamento;
+política de logs;
+política de retenção;
+estrutura dos dados intermediários;
+estratégia de processamento assíncrono;
+estratégia de monitoramento.
+13.27 Conclusão
+A Arquitetura e Gestão do Fluxo de Dados estabelece uma visão intermediária entre o modelo de dados e a implementação da aplicação.
+O objetivo não é apenas extrair informações dos documentos, mas garantir que essas informações atravessem o sistema de forma controlada, rastreável, resiliente e escalável.
+O fluxo definido será a referência para o refinamento do Modelo Lógico, do DDL PostgreSQL, dos modelos SQLAlchemy, dos serviços Python e dos mecanismos de processamento documental.
+Próxima Etapa
+Após este capítulo, recomenda-se revisar o Modelo Entidade-Relacionamento e o Modelo Lógico considerando os requisitos de processamento identificados.
+Somente após essa revisão deverá ser criado o DDL inicial do schema smartdoc, seguido da implementação das entidades no SQLAlchemy.
