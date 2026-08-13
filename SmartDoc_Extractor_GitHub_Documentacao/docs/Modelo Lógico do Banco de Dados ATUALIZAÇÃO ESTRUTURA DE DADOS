@@ -1,0 +1,1163 @@
+SmartDoc Extractor
+Modelo Lógico do Banco de Dados
+PostgreSQL • SQLAlchemy • Versão 2.0 • Agosto de 2026
+1. Objetivo
+Este documento apresenta a versão revisada do Modelo Lógico do Banco de Dados do SmartDoc Extractor, considerando:
+o Modelo de Dados Conceitual;
+a Arquitetura da Solução;
+a Arquitetura e Gestão do Fluxo de Dados;
+processamento síncrono e assíncrono;
+controle de concorrência;
+idempotência;
+retentativas;
+rastreabilidade;
+reprocessamento;
+auditoria;
+escalabilidade.
+O modelo servirá como base para:
+DDL do PostgreSQL;
+modelos SQLAlchemy;
+migrações Alembic;
+APIs REST;
+serviços de processamento;
+mecanismos de workflow;
+consultas e dashboards.
+A versão anterior já possuía as entidades centrais de usuários, documentos, modelos, campos, extrações, validações, workflow, auditoria e exportações. A revisão amplia essa estrutura para representar também o ciclo operacional do processamento documental. fileciteturn3file0
+2. Princípios do Modelo
+O modelo seguirá os seguintes princípios:
+normalização até a 3ª Forma Normal, quando aplicável;
+chaves primárias e estrangeiras explícitas;
+integridade referencial;
+histórico sem sobrescrita indevida;
+rastreabilidade das etapas;
+suporte à idempotência;
+suporte a processamento assíncrono;
+separação entre documento lógico e arquivo físico;
+separação entre configuração e execução;
+possibilidade de reprocessamento;
+preparação para evolução horizontal.
+3. Visão Geral das Entidades
+A versão revisada será composta pelos seguintes grupos.
+Administração
+profiles
+users
+Documentos
+document_types
+documents
+document_files
+Configuração Documental
+document_models
+fields
+extraction_rules
+Processamento
+processing_jobs
+processing_attempts
+processing_steps
+extractions
+extracted_values
+validations
+Workflow e Governança
+workflow_events
+audit_logs
+Saídas e Integrações
+exports
+integrations
+4. Modelo Lógico das Tabelas
+4.1 profiles
+Representa os perfis de acesso.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+name
+VARCHAR(100)
+NOT NULL, UNIQUE
+Nome do perfil
+description
+TEXT
+NULL
+Descrição
+active
+BOOLEAN
+NOT NULL
+Situação
+4.2 users
+Representa os usuários autorizados.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+profile_id
+UUID
+FK → profiles.id
+Perfil
+name
+VARCHAR(150)
+NOT NULL
+Nome
+email
+VARCHAR(254)
+NOT NULL, UNIQUE
+E-mail
+password_hash
+VARCHAR(255)
+NOT NULL
+Hash da senha
+status
+VARCHAR(30)
+NOT NULL
+Estado do usuário
+last_login_at
+TIMESTAMPTZ
+NULL
+Último login
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+updated_at
+TIMESTAMPTZ
+NOT NULL
+Atualização
+4.3 document_types
+Representa o tipo documental.
+Exemplos:
+Nota Fiscal;
+Contrato;
+Boleto;
+Relatório;
+Planilha;
+XML Fiscal.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+name
+VARCHAR(100)
+NOT NULL, UNIQUE
+Nome
+description
+TEXT
+NULL
+Descrição
+active
+BOOLEAN
+NOT NULL
+Situação
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+updated_at
+TIMESTAMPTZ
+NOT NULL
+Atualização
+4.4 documents
+Representa o documento lógico recebido pelo sistema.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador interno
+external_uuid
+UUID
+NOT NULL, UNIQUE
+Identificador externo
+user_id
+UUID
+FK → users.id, NULL
+Usuário responsável
+document_type_id
+UUID
+FK → document_types.id, NULL
+Tipo documental
+filename
+VARCHAR(255)
+NOT NULL
+Nome original
+extension
+VARCHAR(20)
+NOT NULL
+Extensão
+mime_type
+VARCHAR(100)
+NOT NULL
+MIME type
+file_size_bytes
+BIGINT
+NOT NULL
+Tamanho
+file_hash
+CHAR(64)
+NOT NULL, UNIQUE
+SHA-256
+origin
+VARCHAR(50)
+NOT NULL
+Origem
+status
+VARCHAR(40)
+NOT NULL
+Estado atual
+created_at
+TIMESTAMPTZ
+NOT NULL
+Recebimento
+updated_at
+TIMESTAMPTZ
+NOT NULL
+Atualização
+Observação
+O file_hash permanece como mecanismo de controle de duplicidade, conforme previsto no modelo anterior. fileciteturn3file0
+O user_id poderá ser nulo quando o documento tiver origem automática, conforme previsto no modelo conceitual. fileciteturn3file3
+4.5 document_files
+Representa o armazenamento físico do arquivo.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+document_id
+UUID
+FK → documents.id
+Documento
+storage_type
+VARCHAR(30)
+NOT NULL
+Tipo de armazenamento
+storage_path
+TEXT
+NOT NULL
+Localização
+mime_type
+VARCHAR(100)
+NOT NULL
+MIME type
+checksum
+CHAR(64)
+NOT NULL
+Checksum
+size_bytes
+BIGINT
+NOT NULL
+Tamanho
+version
+INTEGER
+NOT NULL
+Versão
+is_original
+BOOLEAN
+NOT NULL
+Indica original
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+Cardinalidade
+documents 1 ───── N document_files
+A estrutura permite preservar o documento original e suportar versões futuras.
+5. Configuração Documental
+5.1 document_models
+Define o modelo esperado para determinado tipo documental.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+document_type_id
+UUID
+FK → document_types.id
+Tipo documental
+name
+VARCHAR(150)
+NOT NULL
+Nome
+version
+INTEGER
+NOT NULL
+Versão
+status
+VARCHAR(30)
+NOT NULL
+Estado
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+updated_at
+TIMESTAMPTZ
+NOT NULL
+Atualização
+Regra
+Um document_type pode possuir vários modelos.
+document_types 1 ───── N document_models
+5.2 fields
+Representa os campos que podem ser extraídos.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+model_id
+UUID
+FK → document_models.id
+Modelo
+name
+VARCHAR(100)
+NOT NULL
+Nome do campo
+data_type
+VARCHAR(30)
+NOT NULL
+Tipo lógico
+required
+BOOLEAN
+NOT NULL
+Obrigatório
+active
+BOOLEAN
+NOT NULL
+Situação
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+updated_at
+TIMESTAMPTZ
+NOT NULL
+Atualização
+5.3 extraction_rules
+Define as regras utilizadas para localizar informações.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+field_id
+UUID
+FK → fields.id
+Campo
+strategy
+VARCHAR(40)
+NOT NULL
+Estratégia
+expression
+TEXT
+NOT NULL
+Expressão/regra
+priority
+INTEGER
+NOT NULL
+Prioridade
+active
+BOOLEAN
+NOT NULL
+Situação
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+updated_at
+TIMESTAMPTZ
+NOT NULL
+Atualização
+Exemplos de estratégia:
+REGEX;
+KEYWORD;
+COORDINATE;
+OCR;
+NLP;
+IA.
+6. Controle do Processamento
+A principal evolução desta versão é separar o documento do processamento, permitindo múltiplas execuções e retentativas sem sobrescrever o histórico.
+6.1 processing_jobs
+Representa uma solicitação de processamento de um documento.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+document_id
+UUID
+FK → documents.id
+Documento
+requested_by
+UUID
+FK → users.id, NULL
+Solicitante
+status
+VARCHAR(40)
+NOT NULL
+Estado
+priority
+INTEGER
+NOT NULL
+Prioridade
+requested_at
+TIMESTAMPTZ
+NOT NULL
+Solicitação
+started_at
+TIMESTAMPTZ
+NULL
+Início
+finished_at
+TIMESTAMPTZ
+NULL
+Finalização
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+Estados possíveis
+RECEBIDO
+AGUARDANDO_PROCESSAMENTO
+PROCESSANDO
+CONCLUIDO
+ERRO
+ERRO_DEFINITIVO
+CANCELADO
+6.2 processing_attempts
+Registra cada tentativa de execução de um processamento.
+Essa tabela é importante para suportar retry e reprocessamento sem perder o histórico.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+job_id
+UUID
+FK → processing_jobs.id
+Job
+attempt_number
+INTEGER
+NOT NULL
+Número da tentativa
+worker_id
+VARCHAR(100)
+NULL
+Identificação do worker
+status
+VARCHAR(30)
+NOT NULL
+Resultado
+error_code
+VARCHAR(50)
+NULL
+Código do erro
+error_message
+TEXT
+NULL
+Mensagem
+started_at
+TIMESTAMPTZ
+NOT NULL
+Início
+finished_at
+TIMESTAMPTZ
+NULL
+Finalização
+duration_ms
+BIGINT
+NULL
+Duração
+created_at
+TIMESTAMPTZ
+NOT NULL
+Registro
+Exemplo
+Job 001
+
+Tentativa 1 → ERRO
+Tentativa 2 → ERRO
+Tentativa 3 → CONCLUIDO
+6.3 processing_steps
+Registra as etapas executadas dentro de uma tentativa.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+attempt_id
+UUID
+FK → processing_attempts.id
+Tentativa
+step_name
+VARCHAR(60)
+NOT NULL
+Etapa
+sequence
+INTEGER
+NOT NULL
+Ordem
+status
+VARCHAR(30)
+NOT NULL
+Estado
+started_at
+TIMESTAMPTZ
+NULL
+Início
+finished_at
+TIMESTAMPTZ
+NULL
+Finalização
+duration_ms
+BIGINT
+NULL
+Duração
+error_code
+VARCHAR(50)
+NULL
+Código
+error_message
+TEXT
+NULL
+Mensagem
+Etapas previstas
+VALIDAÇÃO
+CLASSIFICAÇÃO
+EXTRAÇÃO
+OCR
+NORMALIZAÇÃO
+VALIDAÇÃO_DADOS
+PERSISTÊNCIA
+Nem todas as etapas precisam ser executadas em todos os documentos.
+7. Extração
+7.1 extractions
+Registra uma execução efetiva do mecanismo de extração.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+document_id
+UUID
+FK → documents.id
+Documento
+model_id
+UUID
+FK → document_models.id
+Modelo
+attempt_id
+UUID
+FK → processing_attempts.id, NULL
+Tentativa
+status
+VARCHAR(30)
+NOT NULL
+Estado
+confidence
+NUMERIC(5,4)
+NULL
+Confiança geral
+started_at
+TIMESTAMPTZ
+NOT NULL
+Início
+finished_at
+TIMESTAMPTZ
+NULL
+Finalização
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+Um documento poderá possuir várias extrações ao longo de seu ciclo de vida.
+documents 1 ───── N extractions
+7.2 extracted_values
+Armazena os valores encontrados.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+extraction_id
+UUID
+FK → extractions.id
+Extração
+field_id
+UUID
+FK → fields.id
+Campo
+value
+TEXT
+NULL
+Valor bruto
+normalized_value
+TEXT
+NULL
+Valor normalizado
+confidence
+NUMERIC(5,4)
+NULL
+Confiança
+status
+VARCHAR(30)
+NOT NULL
+Estado
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+updated_at
+TIMESTAMPTZ
+NOT NULL
+Atualização
+Observação
+A separação entre value e normalized_value representa o conceito de dados brutos e dados normalizados definido no Capítulo 13. fileciteturn3file19
+7.3 validations
+Registra as validações realizadas sobre cada valor extraído.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+extracted_value_id
+UUID
+FK → extracted_values.id
+Valor
+rule_name
+VARCHAR(100)
+NOT NULL
+Regra
+result
+VARCHAR(30)
+NOT NULL
+Resultado
+message
+TEXT
+NULL
+Mensagem
+created_at
+TIMESTAMPTZ
+NOT NULL
+Data
+Exemplos de resultado:
+VALID
+INVALID
+WARNING
+PENDING
+8. Workflow
+8.1 workflow_events
+Registra o histórico de estados do documento.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+document_id
+UUID
+FK → documents.id
+Documento
+user_id
+UUID
+FK → users.id, NULL
+Responsável
+state
+VARCHAR(40)
+NOT NULL
+Estado
+started_at
+TIMESTAMPTZ
+NOT NULL
+Início
+finished_at
+TIMESTAMPTZ
+NULL
+Fim
+created_at
+TIMESTAMPTZ
+NOT NULL
+Registro
+A tabela preserva o histórico de workflow sem depender exclusivamente do status atual em documents.
+9. Auditoria
+9.1 audit_logs
+Registra ações relevantes realizadas no sistema.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+user_id
+UUID
+FK → users.id, NULL
+Usuário
+document_id
+UUID
+FK → documents.id, NULL
+Documento
+action
+VARCHAR(100)
+NOT NULL
+Ação
+metadata_json
+JSONB
+NULL
+Metadados
+ip_address
+INET
+NULL
+Origem
+created_at
+TIMESTAMPTZ
+NOT NULL
+Data
+O uso de JSONB fica restrito a metadados de auditoria, não aos dados relacionais principais.
+10. Exportações
+10.1 exports
+Registra arquivos gerados pelo sistema.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+user_id
+UUID
+FK → users.id
+Usuário
+format
+VARCHAR(20)
+NOT NULL
+Formato
+filters_json
+JSONB
+NULL
+Filtros utilizados
+file_path
+TEXT
+NOT NULL
+Arquivo
+record_count
+BIGINT
+NOT NULL
+Registros
+status
+VARCHAR(30)
+NOT NULL
+Estado
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+finished_at
+TIMESTAMPTZ
+NULL
+Finalização
+11. Integrações
+11.1 integrations
+Representa integrações externas.
+Campo
+Tipo lógico
+Restrição
+Descrição
+id
+UUID
+PK
+Identificador
+name
+VARCHAR(150)
+NOT NULL
+Nome
+integration_type
+VARCHAR(50)
+NOT NULL
+Tipo
+endpoint
+TEXT
+NULL
+Endpoint
+status
+VARCHAR(30)
+NOT NULL
+Estado
+last_execution_at
+TIMESTAMPTZ
+NULL
+Última execução
+created_at
+TIMESTAMPTZ
+NOT NULL
+Criação
+updated_at
+TIMESTAMPTZ
+NOT NULL
+Atualização
+12. Relacionamentos
+profiles
+   │
+   └──── 1:N ──── users
+                      │
+                      ├──── 1:N ──── documents
+                      │                 │
+                      │                 ├──── 1:N ──── document_files
+                      │                 │
+                      │                 ├──── N:1 ──── document_types
+                      │                 │                  │
+                      │                 │                  └──── 1:N ──── document_models
+                      │                 │                                      │
+                      │                 │                                      └──── 1:N ──── fields
+                      │                 │                                                      │
+                      │                 │                                                      └──── 1:N ──── extraction_rules
+                      │                 │
+                      │                 ├──── 1:N ──── processing_jobs
+                      │                 │                  │
+                      │                 │                  └──── 1:N ──── processing_attempts
+                      │                 │                                      │
+                      │                 │                                      ├──── 1:N ──── processing_steps
+                      │                 │                                      │
+                      │                 │                                      └──── 1:N ──── extractions
+                      │                 │                                                        │
+                      │                 │                                                        └──── 1:N ──── extracted_values
+                      │                 │                                                                       │
+                      │                 │                                                                       └──── 1:N ──── validations
+                      │                 │
+                      │                 ├──── 1:N ──── workflow_events
+                      │                 └──── 1:N ──── audit_logs
+                      │
+                      └──── 1:N ──── exports
+13. Cardinalidades
+Origem
+Destino
+Cardinalidade
+profiles
+users
+1:N
+users
+documents
+1:N
+document_types
+documents
+1:N
+document_types
+document_models
+1:N
+documents
+document_files
+1:N
+document_models
+fields
+1:N
+fields
+extraction_rules
+1:N
+documents
+processing_jobs
+1:N
+processing_jobs
+processing_attempts
+1:N
+processing_attempts
+processing_steps
+1:N
+processing_attempts
+extractions
+1:N
+documents
+extractions
+1:N
+extractions
+extracted_values
+1:N
+fields
+extracted_values
+1:N
+extracted_values
+validations
+1:N
+documents
+workflow_events
+1:N
+users
+workflow_events
+1:N
+users
+audit_logs
+1:N
+documents
+audit_logs
+1:N
+users
+exports
+1:N
+14. Índices e Restrições Recomendados
+14.1 Documentos
+UNIQUE(documents.file_hash)
+INDEX(documents.status, documents.created_at)
+INDEX(documents.document_type_id)
+INDEX(documents.user_id)
+O índice único no hash atende ao controle de duplicidade previsto no projeto. fileciteturn3file0
+14.2 Processamento
+INDEX(processing_jobs.status, processing_jobs.created_at)
+INDEX(processing_jobs.document_id, processing_jobs.created_at)
+INDEX(processing_attempts.job_id, processing_attempts.attempt_number)
+INDEX(processing_attempts.status)
+INDEX(processing_steps.attempt_id, processing_steps.sequence)
+14.3 Extração
+INDEX(extractions.document_id, extractions.created_at)
+INDEX(extractions.model_id)
+INDEX(extracted_values.extraction_id)
+INDEX(extracted_values.field_id)
+14.4 Auditoria
+INDEX(audit_logs.document_id, audit_logs.created_at)
+INDEX(audit_logs.user_id, audit_logs.created_at)
+14.5 Exportações
+INDEX(exports.user_id, exports.created_at)
+INDEX(exports.status, exports.created_at)
+15. Regras de Integridade
+Toda tabela deverá possuir uma chave primária.
+Toda relação entre entidades deverá utilizar chave estrangeira.
+O hash SHA-256 deverá permitir identificação de conteúdo duplicado.
+O documento original deverá ser preservado conforme a política de retenção.
+Histórico de processamento não deverá ser sobrescrito.
+Cada tentativa deverá possuir um número sequencial dentro de seu processing_job.
+Falhas de processamento deverão poder ser registradas sem apagar o histórico anterior.
+Reprocessamentos deverão gerar novos registros de execução.
+Campos obrigatórios deverão ser validados antes da aprovação.
+Valores extraídos deverão manter o valor original e, quando aplicável, o valor normalizado.
+Registros de auditoria não deverão ser utilizados como substitutos das relações de negócio.
+O status atual do documento deverá representar sua situação corrente, enquanto workflow_events preservará o histórico.
+A quantidade de workers não deverá ser armazenada como regra de negócio nas tabelas de documentos; seu controle pertence à infraestrutura de processamento.
+Dados temporários de fila não deverão ser utilizados como substitutos do histórico persistente do processamento.
+16. Idempotência e Duplicidade
+O mecanismo principal será:
+Documento recebido
+       │
+       ▼
+Calcula SHA-256
+       │
+       ▼
+Consulta documents.file_hash
+       │
+       ├── EXISTE → tratar como duplicidade
+       │
+       └── NÃO EXISTE → registrar documento
+A restrição:
+UNIQUE(file_hash)
+deverá ser implementada no PostgreSQL.
+A regra de negócio para documentos duplicados será definida antes da implementação da API.
+17. Retentativas e Reprocessamento
+A separação entre:
+processing_jobs;
+processing_attempts;
+processing_steps;
+permite representar:
+Documento
+   │
+   ▼
+Job
+   │
+   ├── Tentativa 1
+   │      ├── Validação
+   │      ├── OCR
+   │      └── ERRO
+   │
+   ├── Tentativa 2
+   │      ├── Validação
+   │      ├── OCR
+   │      └── ERRO
+   │
+   └── Tentativa 3
+          ├── Validação
+          ├── OCR
+          ├── Extração
+          └── CONCLUÍDO
+Essa estrutura atende diretamente à necessidade de preservar histórico de retentativas identificada no Capítulo 13. fileciteturn3file19
+18. Processamento Assíncrono
+O banco não será responsável por implementar a fila de mensagens.
+A arquitetura utilizará, conforme a evolução:
+API
+ │
+ ▼
+RabbitMQ
+ │
+ ▼
+Worker
+ │
+ ▼
+processing_jobs
+ │
+ ▼
+processing_attempts
+ │
+ ▼
+processing_steps
+ │
+ ▼
+PostgreSQL
+RabbitMQ permanece como componente de infraestrutura, enquanto o PostgreSQL mantém o estado persistente e o histórico do processamento. A arquitetura do sistema já prevê RabbitMQ e Redis para a evolução de escalabilidade. fileciteturn3file2
+19. Dados Brutos e Dados Normalizados
+A estrutura de extracted_values foi ajustada para preservar:
+value
+   ↓
+normalized_value
+Exemplo:
+value:
+"12.345.678/0001-99"
+
+normalized_value:
+"12345678000199"
+A regra de normalização deverá permanecer no serviço de processamento, e o banco armazenará os resultados.
+20. Normalização
+O modelo deverá priorizar a 3ª Forma Normal.
+As principais decisões são:
+tipos documentais separados de documentos;
+modelos separados de tipos;
+campos separados de modelos;
+regras separadas de campos;
+processamento separado do documento;
+tentativas separadas de jobs;
+etapas separadas de tentativas;
+extrações separadas dos valores;
+validações separadas dos valores;
+auditoria separada das entidades de negócio.
+A versão anterior já estabelecia a normalização até a 3FN como objetivo. fileciteturn3file0
+21. Compatibilidade com SQLAlchemy
+As tabelas foram estruturadas para permitir mapeamento direto para classes SQLAlchemy.
+Exemplo conceitual:
+User
+Profile
+DocumentType
+Document
+DocumentFile
+DocumentModel
+Field
+ExtractionRule
+ProcessingJob
+ProcessingAttempt
+ProcessingStep
+Extraction
+ExtractedValue
+Validation
+WorkflowEvent
+AuditLog
+Export
+Integration
+Os relacionamentos deverão ser definidos por ForeignKey e relationship().
+22. Compatibilidade com PostgreSQL
+A implementação física deverá considerar:
+UUID para identificadores;
+TIMESTAMPTZ para datas e horários;
+JSONB para metadados e filtros;
+INET para endereços IP;
+BIGINT para tamanhos e contagens;
+NUMERIC para confiança;
+CHECK CONSTRAINT para regras de domínio quando apropriado;
+índices para consultas frequentes;
+UNIQUE para identificadores e hash;
+ON DELETE definido individualmente conforme a regra de negócio.
+O PostgreSQL permanece como banco inicial e SQLAlchemy/Alembic como tecnologias de persistência e migração. fileciteturn3file0
+23. Impacto no DDL
+A partir desta revisão, o DDL inicial deverá contemplar, além das tabelas já existentes:
+document_types
+document_files
+processing_jobs
+processing_attempts
+processing_steps
+integrations
+Também deverão ser refinadas as tabelas:
+documents
+document_models
+extractions
+extracted_values
+workflow_events
+exports
+24. Decisões Ainda Pendentes Antes do DDL
+Antes da criação do DDL definitivo, deverão ser fechadas as seguintes decisões:
+valores exatos dos status;
+política de ON DELETE;
+limite máximo de arquivo;
+política de retenção;
+comportamento para duplicidade;
+quantidade máxima de retentativas;
+prioridades de processamento;
+estratégia de armazenamento;
+política de versionamento de arquivos;
+política de reprocessamento;
+definição de quais campos serão obrigatórios;
+estratégia de execução automática versus manual.
+Essas decisões estão alinhadas aos critérios de implementação definidos no Capítulo 13. fileciteturn3file9
+25. Conclusão
+O Modelo Lógico versão 2.0 mantém a estrutura relacional central do SmartDoc Extractor, mas incorpora as necessidades identificadas na Arquitetura e Gestão do Fluxo de Dados.
+A principal evolução é a separação entre:
+DOCUMENTO
+    │
+    └── PROCESSAMENTO
+            │
+            ├── TENTATIVAS
+            │       │
+            │       └── ETAPAS
+            │
+            └── EXTRAÇÕES
+                    │
+                    └── VALORES
+                            │
+                            └── VALIDAÇÕES
+Essa estrutura permite que o sistema:
+preserve histórico;
+controle retentativas;
+suporte reprocessamento;
+acompanhe etapas;
+registre falhas;
+mantenha rastreabilidade;
+suporte processamento assíncrono;
+evolua para maior volume sem depender de uma única execução síncrona.
+O modelo está, portanto, mais preparado para servir de base ao DDL PostgreSQL, mantendo a possibilidade de evolução futura para RabbitMQ, Redis, múltiplos workers, armazenamento em objeto e processamento distribuído.
+26. Próxima Etapa
+A próxima etapa será transformar este Modelo Lógico revisado em:
+DDL inicial do schema smartdoc no PostgreSQL.
+Antes da execução, deverão ser definidas as restrições e valores de domínio pendentes da seção 24.
